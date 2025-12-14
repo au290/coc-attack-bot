@@ -135,7 +135,29 @@ class AutoAttacker:
             self.logger.error(f"Auto attack loop error: {e}")
         finally:
             self.is_running = False
-    
+
+    def _safe_click(self, x: int, y: int, name: str = "button") -> None:
+        """
+        Robust click function that simulates human behavior and ensures
+        the game registers the input by holding the click briefly.
+        """
+        self.logger.info(f"🖱️ Clicking {name} at ({x}, {y})")
+        
+        # 1. Move mouse smoothly (0.2s duration) instead of teleporting
+        # Add tiny random offset to avoid anti-cheat detection logic
+        off_x = random.randint(-2, 2)
+        off_y = random.randint(-2, 2)
+        pyautogui.moveTo(x + off_x, y + off_y, duration=0.2)
+        
+        # 2. Wait a tiny bit (human hesitation)
+        time.sleep(0.1)
+        
+        # 3. Hold the mouse button down for a clear frame duration (100ms+)
+        # This fixes the "click too fast" issue
+        pyautogui.mouseDown()
+        time.sleep(0.15) 
+        pyautogui.mouseUp()
+
     def _execute_attack_sequence(self) -> bool:
         """Execute the complete attack sequence following your exact process"""
         try:
@@ -147,8 +169,8 @@ class AutoAttacker:
                 return False
                 
             attack_coord = coords['attack']
-            self.logger.info(f"1️⃣ Clicking attack button at ({attack_coord['x']}, {attack_coord['y']})")
-            pyautogui.click(attack_coord['x'], attack_coord['y'])
+            self.logger.info(f"1️⃣ Clicking attack button...")
+            self._safe_click(attack_coord['x'], attack_coord['y'], "attack_button")
             time.sleep(2)  # Wait for attack screen
             
             # Step 2-6: Find good loot target
@@ -189,6 +211,7 @@ class AutoAttacker:
         """Find target with good loot following exact process"""
         coords = self.coordinate_mapper.get_coordinates()
         
+        # Validation
         if 'find_a_match' not in coords:
             self.logger.error("find_a_match button not mapped")
             return False
@@ -203,20 +226,33 @@ class AutoAttacker:
         while search_attempts < max_attempts and self.is_running:
             search_attempts += 1
             
-            # Step 2: Click find_a_match
-            find_coord = coords['find_a_match']
-            self.logger.info(f"2️⃣ Clicking find_a_match at ({find_coord['x']}, {find_coord['y']}) - Attempt {search_attempts}/{max_attempts}")
-            pyautogui.click(find_coord['x'], find_coord['y'])
+            # === START SEARCH SEQUENCE (Attempt 1 Only) ===
+            if search_attempts == 1:
+                # Step 2: Click find_a_match
+                find_coord = coords['find_a_match']
+                self.logger.info(f"2️⃣ Clicking find_a_match...")
+                self._safe_click(find_coord['x'], find_coord['y'], "find_a_match")
+                
+                # Step 2.5: Confirm Attack (MANDATORY)
+                if 'confirm_attack' in coords:
+                    confirm_coord = coords['confirm_attack']
+                    self.logger.info("2️⃣.5️⃣ Confirming attack...")
+                    time.sleep(2)  # Wait for button to animate/appear
+                    self._safe_click(confirm_coord['x'], confirm_coord['y'], "confirm_attack")
+                else:
+                    self.logger.error("⛔ 'confirm_attack' button is MISSING from coordinates!")
+                    self.logger.error("Please go to Coordinate Mapping and map the 'confirm_attack' button.")
+                    return False
             
-            # Step 3: Wait 5 seconds
-            self.logger.info("3️⃣ Waiting 5 seconds for base to load...")
+            # Step 3: Wait 5 seconds for base to load
+            self.logger.info(f"3️⃣ Waiting 5 seconds for base to load... (Attempt {search_attempts}/{max_attempts})")
             time.sleep(5)
             
             # Step 4: Check loot
             screenshot_path = self.screen_capture.capture_game_screen()
             if not screenshot_path:
                 self.logger.warning("Could not take screenshot, skipping base...")
-                continue # Try again
+                continue
 
             use_ai = self.config.get('ai_analyzer.enabled', False)
             self.logger.info(f"AI Analysis is {'ENABLED' if use_ai else 'DISABLED'}.")
@@ -237,8 +273,8 @@ class AutoAttacker:
                 self.logger.info("❌ Base not suitable. Clicking next...")
                 if 'next_button' in coords:
                     next_coord = coords['next_button']
-                    pyautogui.click(next_coord['x'], next_coord['y'])
-                    time.sleep(3)  # Wait before next search
+                    self._safe_click(next_coord['x'], next_coord['y'], "next_button")
+                    time.sleep(3)  # Wait for next base
                 else:
                     self.logger.error("next_button not mapped, cannot skip.")
                     return False
@@ -267,13 +303,25 @@ class AutoAttacker:
         while search_attempts < max_attempts and self.is_running:
             search_attempts += 1
             
-            # Click find_a_match
-            find_coord = coords['find_a_match']
-            self.logger.info(f"2️⃣ Clicking find_a_match at ({find_coord['x']}, {find_coord['y']}) - Attempt {search_attempts}/{max_attempts}")
-            pyautogui.click(find_coord['x'], find_coord['y'])
+            # === START SEARCH SEQUENCE (Attempt 1 Only) ===
+            if search_attempts == 1:
+                # Click find_a_match
+                find_coord = coords['find_a_match']
+                self.logger.info(f"2️⃣ Clicking find_a_match...")
+                self._safe_click(find_coord['x'], find_coord['y'], "find_a_match")
+
+                # Click confirm_attack (MANDATORY)
+                if 'confirm_attack' in coords:
+                    confirm_coord = coords['confirm_attack']
+                    self.logger.info("2️⃣.5️⃣ Confirming attack...")
+                    time.sleep(2)
+                    self._safe_click(confirm_coord['x'], confirm_coord['y'], "confirm_attack")
+                else:
+                    self.logger.error("⛔ 'confirm_attack' button is MISSING!")
+                    return False
             
             # Wait for base to load
-            self.logger.info("3️⃣ Waiting 5 seconds for base to load...")
+            self.logger.info(f"3️⃣ Waiting 5 seconds for base to load... (Attempt {search_attempts}/{max_attempts})")
             time.sleep(5)
             
             # Check loot
@@ -300,7 +348,7 @@ class AutoAttacker:
                 # Bad base, click next
                 self.logger.info("❌ Base not suitable. Clicking next...")
                 next_coord = coords['next_button']
-                pyautogui.click(next_coord['x'], next_coord['y'])
+                self._safe_click(next_coord['x'], next_coord['y'], "next_button")
                 time.sleep(3)
         
         return False
@@ -388,8 +436,8 @@ class AutoAttacker:
         
         if 'end_button' in coords:
             end_coord = coords['end_button']
-            self.logger.info(f"🔄 Clicking end_button at ({end_coord['x']}, {end_coord['y']})")
-            pyautogui.click(end_coord['x'], end_coord['y'])
+            self.logger.info(f"🔄 Clicking end_button...")
+            self._safe_click(end_coord['x'], end_coord['y'], "end_button")
             time.sleep(3)  # Wait for end action to complete
         else:
             self.logger.warning("end_button not mapped - cannot retry automatically")
@@ -403,8 +451,8 @@ class AutoAttacker:
         # Only click return_home button
         if 'return_home' in coords:
             home_coord = coords['return_home']
-            self.logger.info(f"Clicking return_home at ({home_coord['x']}, {home_coord['y']})")
-            pyautogui.click(home_coord['x'], home_coord['y'])
+            self.logger.info(f"Clicking return_home...")
+            self._safe_click(home_coord['x'], home_coord['y'], "return_home")
             time.sleep(5)  # Wait to return home
         else:
             self.logger.warning("return_home button not mapped")
@@ -456,11 +504,11 @@ class AutoAttacker:
         return {
             'attack': 'Main attack button on home screen',
             'find_a_match': 'Find match/search button in attack screen',
+            'confirm_attack': 'The new button that appears after find_a_match', # MAPPED REQUIRED
             'next_button': 'Next button to skip bases with low loot',
             'return_home': 'Return home button after battle completion',
             'enemy_gold': 'Enemy gold display for loot checking',
             'enemy_elixir': 'Enemy elixir display for loot checking',
-            'enemy_dark_elixir': 'Enemy dark elixir display for loot checking'
+            'enemy_dark_elixir': 'Enemy dark elixir display for loot checking',
+            'end_button': 'End battle button'
         }
-    
- 
